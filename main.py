@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from fredapi import Fred
 import yfinance as yf
 import datetime as dt
+import math
 
 load_dotenv()
 
@@ -88,9 +89,11 @@ async def get_fed_rate():
 
 
 # ── Live prices (batch) ───────────────────────────────────────
+# Thêm "import math" vào đầu file main.py nếu chưa có
+import math
+
 @app.get("/api/prices")
 async def get_prices(tickers: str = ""):
-    """Fetch live prices. tickers = comma-separated, e.g. ?tickers=SPYI,QQQI,SCHG"""
     ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
     if not ticker_list:
         return {}
@@ -101,26 +104,27 @@ async def get_prices(tickers: str = ""):
 
     prices = {}
     try:
-        if len(ticker_list) == 1:
-            t = ticker_list[0]
-            hist = yf.Ticker(t).history(period="5d")
-            if not hist.empty:
-                prices[t] = round(float(hist["Close"].iloc[-1]), 2)
-        else:
-            data = yf.download(ticker_list, period="5d", progress=False, threads=True)
-            if not data.empty:
-                for t in ticker_list:
-                    try:
-                        prices[t] = round(float(data["Close"][t].iloc[-1]), 2)
-                    except Exception:
-                        pass
+        # Tải dữ liệu 5 ngày gần nhất để đảm bảo có giá trị đóng cửa
+        data = yf.download(ticker_list, period="5d", progress=False, threads=True)
+        
+        if not data.empty:
+            for t in ticker_list:
+                try:
+                    # Lấy toàn bộ cột giá đóng cửa của mã đó, bỏ qua các ô trống (NaN)
+                    series = data["Close"][t].dropna()
+                    if not series.empty:
+                        val = float(series.iloc[-1])
+                        # Kiểm tra chắc chắn giá trị là số thực mới lưu vào
+                        if math.isfinite(val):
+                            prices[t] = round(val, 2)
+                except Exception:
+                    continue
     except Exception:
         pass
 
     if prices:
         _cache[cache_key] = {"data": prices, "_ts": dt.datetime.now().timestamp()}
     return prices
-
 
 # ── Heatmap data ───────────────────────────────────────────────
 @app.get("/api/heatmap/{category}")
