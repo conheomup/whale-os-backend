@@ -10,6 +10,8 @@ from fredapi import Fred
 import yfinance as yf
 import datetime as dt
 import math
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 load_dotenv()
 
@@ -89,39 +91,38 @@ async def get_fed_rate():
 
 
 # ── Live prices (batch) ───────────────────────────────────────
-# Thêm "import math" vào đầu file main.py nếu chưa có
-import math
+
+# --- Cấu hình bộ xử lý song song ---
+executor = ThreadPoolExecutor(max_workers=10)
+
+def fetch_single_price(ticker):
+    """Hàm phụ tải giá 1 mã (chạy trên luồng riêng)"""
+    try:
+        t_obj = yf.Ticker(ticker)
+        # Lấy 2 ngày để chắc chắn có giá đóng cửa mới nhất
+        hist = t_obj.history(period="2d")
+        if not hist.empty:
+            return ticker, round(float(hist["Close"].iloc[-1]), 2)
+    except Exception:
+        pass
+    return ticker, None
 
 @app.get("/api/prices")
 async def get_prices(tickers: str = ""):
     ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
-    if not ticker_list:
-        return {}
+    if not ticker_list: return {}
 
-    cache_key = "prices:" + ",".join(sorted(ticker_list))
+    cache_key = f"prices:{','.join(sorted(ticker_list))}"
     if _is_fresh(cache_key):
         return _cache[cache_key]["data"]
 
-    prices = {}
-    try:
-        # Tải dữ liệu 5 ngày gần nhất để đảm bảo có giá trị đóng cửa
-        data = yf.download(ticker_list, period="5d", progress=False, threads=True)
-        
-        if not data.empty:
-            for t in ticker_list:
-                try:
-                    # Lấy toàn bộ cột giá đóng cửa của mã đó, bỏ qua các ô trống (NaN)
-                    series = data["Close"][t].dropna()
-                    if not series.empty:
-                        val = float(series.iloc[-1])
-                        # Kiểm tra chắc chắn giá trị là số thực mới lưu vào
-                        if math.isfinite(val):
-                            prices[t] = round(val, 2)
-                except Exception:
-                    continue
-    except Exception:
-        pass
-
+    # Chạy song song tất cả các mã cùng lúc
+    loop = asyncio.get_event_loop()
+    tasks = [loop.run_in_executor(executor, fetch_single_price, t) for t in ticker_list]
+    results = await asyncio.gather(*tasks)
+    
+    # Gom kết quả
+    prices = {ticker: price for ticker, price in results if price is not None}
     if prices:
         _cache[cache_key] = {"data": prices, "_ts": dt.datetime.now().timestamp()}
     return prices
@@ -148,24 +149,25 @@ async def get_heatmap(category: str, period: str = "1d"):
     try:
         if category == "mag7":
             tickers = configs["mag7"]
+            # Sửa đoạn này trong main.py
             for t in tickers:
                 try:
                     ticker_obj = yf.Ticker(t)
-                    info = ticker_obj.info
+                    # Chỉ dùng history, không dùng .info để tránh bị Yahoo chặn
                     hist = ticker_obj.history(period=hist_period)
-                    current_price = round(float(hist["Close"].iloc[-1]), 2) if not hist.empty else 0
-                    if valid_period == "1w" and not hist.empty and len(hist) >= 5:
-                        change = round(((hist["Close"].iloc[-1] / hist["Close"].iloc[-5]) - 1) * 100, 2)
-                    elif valid_period == "1d" and not hist.empty and len(hist) >= 2:
-                        change = round(((hist["Close"].iloc[-1] / hist["Close"].iloc[-2]) - 1) * 100, 2)
-                    else:
-                        change = round(info.get("regularMarketChangePercent", 0), 2)
-                    results.append({
-                        "name": t,
-                        "size": round(info.get("marketCap", 1e9) / 1e9),
-                        "change": change,
-                        "price": current_price,
-                    })
+                    if not hist.empty:
+                        current_price = round(float(hist["Close"].iloc[-1]), 2)
+                        # Tính % thay đổi từ lịch sử
+                        if len(hist) >= 2:
+                            change = round(((hist["Close"].iloc[-1] / hist["Close"].iloc[-2]) - 1) * 100, 2)
+                        else:
+                            change = 0
+                        results.append({
+                            "name": t,
+                            "size": 1000, # Gán tạm size cố định hoặc lấy từ history
+                            "change": change,
+                            "price": current_price,
+                        })
                 except Exception:
                     results.append({"name": t, "size": 100, "change": 0, "price": 0})
         elif category == "sectors":
