@@ -147,24 +147,29 @@ async def get_heatmap(category: str, period: str = "1d"):
 
     results = []
     try:
+        # --- Cập nhật đoạn này trong main.py ---
         if category == "mag7":
             tickers = configs["mag7"]
-            # Sửa đoạn này trong main.py
             for t in tickers:
                 try:
                     ticker_obj = yf.Ticker(t)
-                    # Chỉ dùng history, không dùng .info để tránh bị Yahoo chặn
                     hist = ticker_obj.history(period=hist_period)
                     if not hist.empty:
                         current_price = round(float(hist["Close"].iloc[-1]), 2)
-                        # Tính % thay đổi từ lịch sử
-                        if len(hist) >= 2:
+                        
+                        # FIX: Tính % thay đổi dựa trên period (1d vs 1w)
+                        if valid_period == "1w" and len(hist) >= 5:
+                            # So sánh giá đóng cửa hôm nay với 5 ngày trước (1 tuần giao dịch)
+                            change = round(((hist["Close"].iloc[-1] / hist["Close"].iloc[-5]) - 1) * 100, 2)
+                        elif len(hist) >= 2:
+                            # Mặc định so sánh với ngày hôm qua (1d)
                             change = round(((hist["Close"].iloc[-1] / hist["Close"].iloc[-2]) - 1) * 100, 2)
                         else:
                             change = 0
+                            
                         results.append({
                             "name": t,
-                            "size": 1000, # Gán tạm size cố định hoặc lấy từ history
+                            "size": 1000, 
                             "change": change,
                             "price": current_price,
                         })
