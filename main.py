@@ -107,21 +107,35 @@ async def get_fed_rate():
 executor = ThreadPoolExecutor(max_workers=10)
 
 def fetch_single_price(ticker):
-    """Hàm phụ tải giá và Forward Dividend Rate 1 mã"""
+    """Hàm phụ tải giá và Tỷ lệ cổ tức 1 năm (Forward/TTM) với 3 lớp bảo vệ"""
     try:
         t_obj = yf.Ticker(ticker)
-        hist = t_obj.history(period="2d")
+        # Tải lịch sử 1 năm để lấy giá và làm fallback tính tổng cổ tức
+        hist = t_obj.history(period="1y")
         if not hist.empty:
             price = round(float(hist["Close"].iloc[-1]), 2)
             div_rate = 0.0
+            
             try:
-                # Lấy Forward Dividend Rate từ Yahoo (nếu ko có thì lấy trailing 1 năm)
                 info = t_obj.info
+                # Lớp 1: Cố gắng lấy Dividend Rate trực tiếp (Cho cổ phiếu lẻ như MPT)
                 div_rate = float(info.get("dividendRate") or info.get("trailingAnnualDividendRate") or 0.0)
+                
+                # Lớp 2: Nếu Rate trống (Thường gặp ở ETF như SPYI, SCHG), tính từ Yield %
+                if div_rate == 0.0:
+                    div_yield = float(info.get("dividendYield") or info.get("trailingAnnualDividendYield") or info.get("yield") or 0.0)
+                    if div_yield > 0:
+                        div_rate = div_yield * price
+                    
+                    # Lớp 3: Cứu cánh cuối cùng - Cộng dồn cổ tức thực tế đã trả trong 1 năm qua
+                    elif "Dividends" in hist:
+                        div_rate = float(hist["Dividends"].sum())
             except Exception:
-                pass
-            # Trả về Object thay vì chỉ là con số
-            return ticker, {"price": price, "divRate": div_rate}
+                # Nếu API info bị chặn, fallback xuống Lớp 3
+                if "Dividends" in hist:
+                    div_rate = float(hist["Dividends"].sum())
+                    
+            return ticker, {"price": price, "divRate": round(div_rate, 4)}
     except Exception:
         pass
     return ticker, None
