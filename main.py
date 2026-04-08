@@ -103,17 +103,25 @@ async def get_fed_rate():
 # ── Live prices (batch) ───────────────────────────────────────
 
 # --- Cấu hình bộ xử lý song song ---
+# --- Thay thế từ dòng 68 đến 95 trong main.py ---
 executor = ThreadPoolExecutor(max_workers=10)
 
 def fetch_single_price(ticker):
-    """Hàm phụ tải giá 1 mã (chạy trên luồng riêng)"""
+    """Hàm phụ tải giá và Forward Dividend Rate 1 mã"""
     try:
         t_obj = yf.Ticker(ticker)
         hist = t_obj.history(period="2d")
         if not hist.empty:
-            price = safe_float(hist["Close"].iloc[-1], None)
-            if price is not None:
-                return ticker, round(price, 2)
+            price = round(float(hist["Close"].iloc[-1]), 2)
+            div_rate = 0.0
+            try:
+                # Lấy Forward Dividend Rate từ Yahoo (nếu ko có thì lấy trailing 1 năm)
+                info = t_obj.info
+                div_rate = float(info.get("dividendRate") or info.get("trailingAnnualDividendRate") or 0.0)
+            except Exception:
+                pass
+            # Trả về Object thay vì chỉ là con số
+            return ticker, {"price": price, "divRate": div_rate}
     except Exception:
         pass
     return ticker, None
@@ -127,13 +135,12 @@ async def get_prices(tickers: str = ""):
     if _is_fresh(cache_key):
         return _cache[cache_key]["data"]
 
-    # Chạy song song tất cả các mã cùng lúc
     loop = asyncio.get_event_loop()
     tasks = [loop.run_in_executor(executor, fetch_single_price, t) for t in ticker_list]
     results = await asyncio.gather(*tasks)
     
-    # Gom kết quả
-    prices = {ticker: price for ticker, price in results if price is not None}
+    # Gom kết quả thành dạng: {"SPYI": {"price": 49.24, "divRate": 5.92}, ...}
+    prices = {ticker: data for ticker, data in results if data is not None}
     if prices:
         _cache[cache_key] = {"data": prices, "_ts": dt.datetime.now().timestamp()}
     return prices
