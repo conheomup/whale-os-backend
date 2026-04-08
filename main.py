@@ -206,10 +206,6 @@ async def get_heatmap(category: str, period: str = "1d"):
                     pass
     except Exception:
         pass
-        else:
-            return []
-    except Exception:
-        pass
 
     if results:
         _cache[cache_key] = {"data": results, "_ts": dt.datetime.now().timestamp()}
