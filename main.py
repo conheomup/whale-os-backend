@@ -125,6 +125,11 @@ def fetch_single_price(ticker):
                 if div_rate == 0.0:
                     div_yield = float(info.get("dividendYield") or info.get("trailingAnnualDividendYield") or info.get("yield") or 0.0)
                     if div_yield > 0:
+                        # --- FIX LỖI NHÂN 100 LẦN Ở ĐÂY ---
+                        # Nếu API trả về 12.5 thay vì 0.125, ta chia cho 100
+                        if div_yield > 1:
+                            div_yield = div_yield / 100
+                            
                         div_rate = div_yield * price
                     
                     # Lớp 3: Cứu cánh cuối cùng - Cộng dồn cổ tức thực tế đã trả trong 1 năm qua
