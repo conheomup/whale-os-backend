@@ -159,49 +159,38 @@ async def get_heatmap(category: str, period: str = "1d"):
     results = []
     try:
         if category == "mag7":
-            tickers = configs["mag7"]
-            for t in tickers:
+            for t in configs["mag7"]:
                 try:
-                    ticker_obj = yf.Ticker(t)
-                    hist = ticker_obj.history(period=hist_period)
-                    if not hist.empty:
-                        current_price = safe_float(hist["Close"].iloc[-1])
-                        
-                        if valid_period == "1w" and len(hist) >= 5:
-                            p1 = safe_float(hist["Close"].iloc[-1])
-                            p5 = safe_float(hist["Close"].iloc[-5])
-                            change = round(((p1 / p5) - 1) * 100, 2) if p5 > 0 else 0
-                        elif len(hist) >= 2:
-                            p1 = safe_float(hist["Close"].iloc[-1])
-                            p2 = safe_float(hist["Close"].iloc[-2])
-                            change = round(((p1 / p2) - 1) * 100, 2) if p2 > 0 else 0
-                        else:
-                            change = 0
+                    hist = yf.Ticker(t).history(period=hist_period)
+                    # Kiểm tra và dùng dropna() để vứt bỏ các ngày bị lỗi NaN
+                    if not hist.empty and "Close" in hist:
+                        closes = hist["Close"].dropna() 
+                        if len(closes) >= 2:
+                            p1 = float(closes.iloc[-1])
+                            p_prev = float(closes.iloc[-5]) if valid_period == "1w" and len(closes) >= 5 else float(closes.iloc[-2])
+                            change = round(((p1 / p_prev) - 1) * 100, 2) if p_prev > 0 else 0
                             
-                        results.append({
-                            "name": t,
-                            "size": 1000, 
-                            "change": safe_float(change),
-                            "price": current_price,
-                        })
+                            results.append({
+                                "name": t, "size": 1000, 
+                                "change": change, "price": round(p1, 2)
+                            })
+                            continue
                 except Exception:
-                    results.append({"name": t, "size": 100, "change": 0, "price": 0})
+                    pass
+                # Nếu API lỗi hoàn toàn, trả về 0 để không bị sập
+                results.append({"name": t, "size": 100, "change": 0, "price": 0})
                     
         elif category == "sectors":
             for ticker, name in configs["sectors"].items():
                 try:
                     hist = yf.Ticker(ticker).history(period=hist_period)
-                    if not hist.empty and len(hist) >= 2:
-                        if valid_period == "1w" and len(hist) >= 5:
-                            p1 = safe_float(hist["Close"].iloc[-1])
-                            p5 = safe_float(hist["Close"].iloc[-5])
-                            change = round(((p1 / p5) - 1) * 100, 2) if p5 > 0 else 0
-                        else:
-                            p1 = safe_float(hist["Close"].iloc[-1])
-                            p2 = safe_float(hist["Close"].iloc[-2])
-                            change = round(((p1 / p2) - 1) * 100, 2) if p2 > 0 else 0
-                        
-                        results.append({"name": name, "size": 1000, "change": safe_float(change)})
+                    if not hist.empty and "Close" in hist:
+                        closes = hist["Close"].dropna() 
+                        if len(closes) >= 2:
+                            p1 = float(closes.iloc[-1])
+                            p_prev = float(closes.iloc[-5]) if valid_period == "1w" and len(closes) >= 5 else float(closes.iloc[-2])
+                            change = round(((p1 / p_prev) - 1) * 100, 2) if p_prev > 0 else 0
+                            results.append({"name": name, "size": 1000, "change": change})
                 except Exception:
                     pass
     except Exception:
@@ -210,7 +199,6 @@ async def get_heatmap(category: str, period: str = "1d"):
     if results:
         _cache[cache_key] = {"data": results, "_ts": dt.datetime.now().timestamp()}
     return results
-
 
 if __name__ == "__main__":
     import uvicorn
