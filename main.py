@@ -13,6 +13,16 @@ import math
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
+# ── Hàm bảo vệ chống lỗi NaN từ yfinance ──
+def safe_float(val, fallback=0.0):
+    try:
+        f = float(val)
+        if math.isnan(f) or math.isinf(f):
+            return fallback
+        return f
+    except Exception:
+        return fallback
+
 load_dotenv()
 
 app = FastAPI(title="The Whale OS API", version="2.0")
@@ -99,10 +109,11 @@ def fetch_single_price(ticker):
     """Hàm phụ tải giá 1 mã (chạy trên luồng riêng)"""
     try:
         t_obj = yf.Ticker(ticker)
-        # Lấy 2 ngày để chắc chắn có giá đóng cửa mới nhất
         hist = t_obj.history(period="2d")
         if not hist.empty:
-            return ticker, round(float(hist["Close"].iloc[-1]), 2)
+            price = safe_float(hist["Close"].iloc[-1], None)
+            if price is not None:
+                return ticker, round(price, 2)
     except Exception:
         pass
     return ticker, None
@@ -147,7 +158,6 @@ async def get_heatmap(category: str, period: str = "1d"):
 
     results = []
     try:
-        # --- Cập nhật đoạn này trong main.py ---
         if category == "mag7":
             tickers = configs["mag7"]
             for t in tickers:
@@ -155,38 +165,47 @@ async def get_heatmap(category: str, period: str = "1d"):
                     ticker_obj = yf.Ticker(t)
                     hist = ticker_obj.history(period=hist_period)
                     if not hist.empty:
-                        current_price = round(float(hist["Close"].iloc[-1]), 2)
+                        current_price = safe_float(hist["Close"].iloc[-1])
                         
-                        # FIX: Tính % thay đổi dựa trên period (1d vs 1w)
                         if valid_period == "1w" and len(hist) >= 5:
-                            # So sánh giá đóng cửa hôm nay với 5 ngày trước (1 tuần giao dịch)
-                            change = round(((hist["Close"].iloc[-1] / hist["Close"].iloc[-5]) - 1) * 100, 2)
+                            p1 = safe_float(hist["Close"].iloc[-1])
+                            p5 = safe_float(hist["Close"].iloc[-5])
+                            change = round(((p1 / p5) - 1) * 100, 2) if p5 > 0 else 0
                         elif len(hist) >= 2:
-                            # Mặc định so sánh với ngày hôm qua (1d)
-                            change = round(((hist["Close"].iloc[-1] / hist["Close"].iloc[-2]) - 1) * 100, 2)
+                            p1 = safe_float(hist["Close"].iloc[-1])
+                            p2 = safe_float(hist["Close"].iloc[-2])
+                            change = round(((p1 / p2) - 1) * 100, 2) if p2 > 0 else 0
                         else:
                             change = 0
                             
                         results.append({
                             "name": t,
                             "size": 1000, 
-                            "change": change,
+                            "change": safe_float(change),
                             "price": current_price,
                         })
                 except Exception:
                     results.append({"name": t, "size": 100, "change": 0, "price": 0})
+                    
         elif category == "sectors":
             for ticker, name in configs["sectors"].items():
                 try:
                     hist = yf.Ticker(ticker).history(period=hist_period)
                     if not hist.empty and len(hist) >= 2:
                         if valid_period == "1w" and len(hist) >= 5:
-                            change = round(((hist["Close"].iloc[-1] / hist["Close"].iloc[-5]) - 1) * 100, 2)
+                            p1 = safe_float(hist["Close"].iloc[-1])
+                            p5 = safe_float(hist["Close"].iloc[-5])
+                            change = round(((p1 / p5) - 1) * 100, 2) if p5 > 0 else 0
                         else:
-                            change = round(((hist["Close"].iloc[-1] / hist["Close"].iloc[-2]) - 1) * 100, 2)
-                        results.append({"name": name, "size": 1000, "change": change})
+                            p1 = safe_float(hist["Close"].iloc[-1])
+                            p2 = safe_float(hist["Close"].iloc[-2])
+                            change = round(((p1 / p2) - 1) * 100, 2) if p2 > 0 else 0
+                        
+                        results.append({"name": name, "size": 1000, "change": safe_float(change)})
                 except Exception:
                     pass
+    except Exception:
+        pass
         else:
             return []
     except Exception:
