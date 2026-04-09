@@ -107,13 +107,12 @@ async def get_fed_rate():
 executor = ThreadPoolExecutor(max_workers=10)
 
 def fetch_single_price(ticker):
-    """Hàm phụ tải giá và Tỷ lệ cổ tức 1 năm với 3 lớp bảo vệ an toàn"""
+    """Hàm phụ tải giá và Tỷ lệ cổ tức 1 năm (Không dùng Lớp 3 để tránh nhiễu Capital Gains)"""
     try:
         t_obj = yf.Ticker(ticker)
-        hist = t_obj.history(period="1y")
+        hist = t_obj.history(period="5d")
         
         if not hist.empty and "Close" in hist:
-            # Lọc bỏ NaN để chắc chắn có giá hợp lệ
             close_prices = hist["Close"].dropna()
             if close_prices.empty:
                 return ticker, None
@@ -133,18 +132,11 @@ def fetch_single_price(ticker):
                     raw_yield = info.get("dividendYield") or info.get("trailingAnnualDividendYield") or info.get("yield")
                     if raw_yield is not None:
                         div_yield = float(raw_yield)
-                        # Fix lỗi % (VD: 12.5 thay vì 0.125)
                         if div_yield > 1:
                             div_yield = div_yield / 100
                         div_rate = div_yield * price
-                        
-                    # Lớp 3: Cứu cánh cuối cùng - Cộng dồn lịch sử trả cổ tức 1 năm
-                    elif "Dividends" in hist:
-                        div_rate = float(hist["Dividends"].sum())
             except Exception:
-                # Nếu API info bị chặn, fallback xuống Lớp 3
-                if "Dividends" in hist:
-                    div_rate = float(hist["Dividends"].sum())
+                pass
                     
             return ticker, {"price": price, "divRate": round(div_rate, 4)}
     except Exception:
