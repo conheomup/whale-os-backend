@@ -103,11 +103,10 @@ async def get_fed_rate():
 # ── Live prices (batch) ───────────────────────────────────────
 
 # --- Cấu hình bộ xử lý song song ---
-# --- Thay thế từ dòng 68 đến 95 trong main.py ---
 executor = ThreadPoolExecutor(max_workers=10)
 
 def fetch_single_price(ticker):
-    """Hàm phụ tải giá và Tỷ lệ cổ tức 1 năm (Không dùng Lớp 3 để tránh nhiễu Capital Gains)"""
+    """Hàm phụ tải giá và Tỷ lệ cổ tức 1 năm (SẠCH - KHÔNG DÙNG TRAILING)"""
     try:
         t_obj = yf.Ticker(ticker)
         hist = t_obj.history(period="5d")
@@ -122,14 +121,14 @@ def fetch_single_price(ticker):
             
             try:
                 info = t_obj.info
-                # Lớp 1: Cố gắng lấy Dividend Rate trực tiếp
-                raw_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate")
+                # Lớp 1: Cố gắng lấy Dividend Rate trực tiếp (BỎ CHỮ TRAILING)
+                raw_rate = info.get("dividendRate")
                 if raw_rate is not None:
                     div_rate = float(raw_rate)
                 
-                # Lớp 2: Nếu Rate trống, tính từ Yield %
+                # Lớp 2: Nếu Rate trống, tính từ Yield % (BỎ CHỮ TRAILING)
                 if div_rate == 0.0:
-                    raw_yield = info.get("dividendYield") or info.get("trailingAnnualDividendYield") or info.get("yield")
+                    raw_yield = info.get("dividendYield") or info.get("yield")
                     if raw_yield is not None:
                         div_yield = float(raw_yield)
                         if div_yield > 1:
